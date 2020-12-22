@@ -1,0 +1,90 @@
+pipeline {
+    agent { docker { 
+        image 'python:latest' 
+        args '-p 8822:8822'
+    } }
+
+    environment {
+        PROJECT_NAME = "Task3"
+        OWNER_NAME   = "Viacheslav"
+        PAGERDUTY_SERVERS_INT_KEY = credentials('PAGERDUTY_SERVERS_INT_KEY')
+    }
+
+    stages {
+        stage('Build') {
+            steps {
+                withEnv(["HOME=${env.WORKSPACE}"]) {
+                    sh '''
+                        echo Start Build...
+                        echo "PROJECT_NAME: ${PROJECT_NAME}"
+                        echo "OWNER_NAME: ${OWNER_NAME}"
+                        echo "JOB_NAME: ${JOB_NAME}"
+                        echo "BUILD_URL: ${BUILD_URL}"
+                        python --version
+
+                        echo Building.......
+
+                        if ! [ -d task3_python_code ]; then
+                            git clone https://github.com/Lotos2021/task3_python_code.git
+                        fi
+
+                        cd task3_python_code
+                        git pull
+                        pip3 install -r requirements.txt --user
+                        echo End Build...
+                    '''
+                }
+            }
+        }
+        stage('Test') {
+            steps {
+                withEnv(["HOME=${env.WORKSPACE}"]) {
+                    sh '''
+                        echo "Start Test..."
+                        echo "Testing......."
+                        cd task3_python_code
+                        python3 test.py
+                        echo "End Test..."
+                    '''
+                }
+            }
+        }
+        stage('Publish') {
+            steps {
+                withEnv(["HOME=${env.WORKSPACE}"]) {
+                    sh '''
+                        echo "Start Publish..."
+                        echo "Publishing......."
+                        cd task3_python_code
+                        python3 publish.py
+                        echo "End Publish..."
+                    '''
+                }
+            }
+        }
+        stage('Deploy') {
+            steps {
+                withEnv(["HOME=${env.WORKSPACE}"]) {
+                    sh '''
+                        echo "Start Deploy..."
+                        echo "Deploying......."
+                        cd task3_python_code
+                        python3 deploy.py
+                        echo "End Deploy..."
+                    '''
+                }
+            }
+        }	
+    }
+    post {
+        failure {
+            sh '''
+                curl -X POST -H "content-type: application/json" \
+                --data \
+                '{"routing_key":"'${PAGERDUTY_SERVERS_INT_KEY}'","event_action":"trigger","payload":{"summary":"'${JOB_NAME}' job failed '${BUILD_URL}'","source":"Jenkins","severity":"critical","component":"exploratory-stats","group":"prod-datapipe","class":"deploy"}}' \
+                https://events.pagerduty.com/v2/enqueue
+
+            '''
+        }
+    }
+}
